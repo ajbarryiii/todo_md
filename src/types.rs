@@ -52,6 +52,8 @@ impl Todo {
     }
 
     pub fn try_from_str(line: &str) -> Result<Todo, String> {
+        let line = line.trim();
+
         let todo_regex = Regex::new(
             r"^- \[(?P<done>[xX_ ])\] (?P<name>.+?)(?: \(due: (?P<due_date>[^)]+)\))?(?: \((?:reccurence|recurrence): (?P<reccurence>[^)]+)\))?(?: \(id: (?P<id>[0-9a-fA-F-]{36})\))?\.?$",
         )
@@ -294,6 +296,15 @@ mod tests {
     fn parses_markdown_checkbox_with_due_and_no_id() {
         let todo = Todo::try_from_str("- [ ] ensure todos are actually syncing (due: today)")
             .expect("should parse markdown style checkbox line");
+
+        assert!(!todo.done());
+        assert!(todo.due_date().is_some());
+    }
+
+    #[test]
+    fn parses_line_with_surrounding_whitespace() {
+        let todo = Todo::try_from_str("   - [ ] ensure todos are actually syncing (due: today)   ")
+            .expect("should parse with leading/trailing whitespace");
 
         assert!(!todo.done());
         assert!(todo.due_date().is_some());

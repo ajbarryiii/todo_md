@@ -149,7 +149,13 @@ pub fn sync(config: &AppConfig) -> Result<SyncResult> {
     )?;
     run_git_checked(
         &config.config_dir,
-        ["pull", "--rebase", "origin", config.git_branch.as_str()],
+        [
+            "pull",
+            "--rebase",
+            "--autostash",
+            "origin",
+            config.git_branch.as_str(),
+        ],
     )?;
 
     let todo_rel = todo_path_relative_to_repo(config)?;

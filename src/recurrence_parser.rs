@@ -47,6 +47,16 @@ pub fn next_due_date_utc(
     Some(next_local.with_timezone(&Utc))
 }
 
+pub fn is_rollover_due_date(
+    previous_due: DateTime<Utc>,
+    current_due: DateTime<Utc>,
+    recurrence: &Reccurence,
+) -> bool {
+    next_due_date_utc(previous_due, recurrence)
+        .map(|next| next == current_due)
+        .unwrap_or(false)
+}
+
 fn next_due_naive(due: NaiveDateTime, recurrence: &Reccurence) -> Option<NaiveDateTime> {
     match recurrence {
         Reccurence::Daily => Some(due + Duration::days(1)),

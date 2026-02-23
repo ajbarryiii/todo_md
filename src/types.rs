@@ -4,6 +4,7 @@ use chrono::prelude::*;
 use regex::Regex;
 use uuid::*;
 
+#[derive(Debug, Clone)]
 pub struct Todo {
     id: Uuid,
     done: bool,

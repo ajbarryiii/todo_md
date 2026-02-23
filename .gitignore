@@ -1,10 +1,16 @@
 /target
 
 /.cargo-home
+
+# Local runtime config for todo sync (if created in-repo)
+/.config/todos/
+
+# Local secrets
+.env
+
 # direnv / Nix shells
 .direnv/
 
 # Result symlinks from 'nix-build' or 'nix build'
 result
 result-*
-

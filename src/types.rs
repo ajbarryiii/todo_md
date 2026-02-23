@@ -48,6 +48,10 @@ impl Todo {
     }
 
     pub fn from_str(line: &str) -> Todo {
+        Self::try_from_str(line).expect("todo line does not match expected format")
+    }
+
+    pub fn try_from_str(line: &str) -> Result<Todo, String> {
         let todo_regex = Regex::new(
             r"^- \[(?P<done>[xX_ ])\] (?P<name>.+?)(?: \(due: (?P<due_date>[^)]+)\))?(?: \((?:reccurence|recurrence): (?P<reccurence>[^)]+)\))?(?: \(id: (?P<id>[0-9a-fA-F-]{36})\))?\.?$",
         )
@@ -55,7 +59,7 @@ impl Todo {
 
         let captures = todo_regex
             .captures(line)
-            .expect("todo line does not match expected format");
+            .ok_or_else(|| "todo line does not match expected format".to_string())?;
 
         let mut todo = Todo::new(captures["name"].trim().to_string());
         todo.done = matches!(&captures["done"], "x" | "X");
@@ -82,7 +86,7 @@ impl Todo {
         }
 
         todo.updated_at = Utc::now();
-        todo
+        Ok(todo)
     }
 
     pub fn to_line(&self) -> String {
@@ -284,5 +288,14 @@ mod tests {
 
         assert_eq!(todo.recurence(), Some(&Reccurence::Monthly(Some(1))));
         assert!(todo.to_line().contains("(reccurence: monthly on 1st)"));
+    }
+
+    #[test]
+    fn parses_markdown_checkbox_with_due_and_no_id() {
+        let todo = Todo::try_from_str("- [ ] ensure todos are actually syncing (due: today)")
+            .expect("should parse markdown style checkbox line");
+
+        assert!(!todo.done());
+        assert!(todo.due_date().is_some());
     }
 }

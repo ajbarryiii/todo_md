@@ -78,8 +78,7 @@ pub fn validate_todo_content(content: &str) -> Vec<String> {
             continue;
         }
 
-        let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
-        let todo = match parsed {
+        let todo = match Todo::try_from_str(line) {
             Ok(todo) => todo,
             Err(_) => {
                 issues.push(format!("line {line_no}: todo line could not be parsed"));
@@ -121,8 +120,7 @@ pub fn format_todo_content(content: &str) -> (String, Vec<String>) {
         }
 
         if !line.contains("(id:") {
-            let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
-            match parsed {
+            match Todo::try_from_str(line) {
                 Ok(todo) => {
                     out.push(todo.to_line());
                     continue;
@@ -135,8 +133,7 @@ pub fn format_todo_content(content: &str) -> (String, Vec<String>) {
             }
         }
 
-        let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
-        match parsed {
+        match Todo::try_from_str(line) {
             Ok(todo) => out.push(todo.to_line()),
             Err(_) => {
                 issues.push(format!("line {line_no}: todo line could not be parsed"));
@@ -166,8 +163,7 @@ pub fn hydrate_todo_ids(content: &str) -> (String, usize, Vec<String>) {
             continue;
         }
 
-        let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
-        match parsed {
+        match Todo::try_from_str(line) {
             Ok(todo) => {
                 out.push(todo.to_line());
                 changed += 1;
@@ -215,7 +211,7 @@ fn parse_todos_from_content(content: &str) -> HashMap<Uuid, Todo> {
             continue;
         }
 
-        if let Ok(todo) = std::panic::catch_unwind(|| Todo::from_str(line)) {
+        if let Ok(todo) = Todo::try_from_str(line) {
             todos.insert(todo.id(), todo);
         }
     }

@@ -1,11 +1,15 @@
 use std::path::Path;
 use std::process::{Command, Output};
+use std::{fs, io};
 
 use anyhow::{bail, Context, Result};
 
 use crate::config::{require_remote, AppConfig};
 use crate::diff::{line_diff_summary, semantic_changes, ChangeSet};
-use crate::storage::{ensure_layout, parse_todo_content, read_todo_file, validate_todo_content};
+use crate::storage::{
+    ensure_layout, hydrate_todo_ids, parse_todo_content, read_todo_file, validate_todo_content,
+    write_todo_file_atomic,
+};
 
 #[derive(Debug, Clone)]
 pub struct SyncResult {
@@ -33,6 +37,54 @@ pub fn setup(config: &AppConfig, remote_override: Option<&str>) -> Result<()> {
     if let Some(remote) = remote {
         ensure_github_repo_exists(config, &remote)?;
         ensure_remote(&config.config_dir, "origin", &remote)?;
+        upsert_env_var(&config.env_file, "TODOS_GIT_REMOTE", &remote)?;
+    }
+
+    Ok(())
+}
+
+fn upsert_env_var(path: &Path, key: &str, value: &str) -> Result<()> {
+    let existing = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to read env file {}", path.display()))
+        }
+    };
+
+    let mut found = false;
+    let mut lines = Vec::new();
+
+    for line in existing.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((lhs, _rhs)) = line.split_once('=') {
+            if lhs.trim() == key {
+                lines.push(format!("{key}={value}"));
+                found = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !found {
+        lines.push(format!("{key}={value}"));
+    }
+
+    let mut next = lines.join("\n");
+    if !next.is_empty() {
+        next.push('\n');
+    }
+
+    if next != existing {
+        write_todo_file_atomic(path, &next)?;
     }
 
     Ok(())
@@ -102,7 +154,25 @@ pub fn sync(config: &AppConfig) -> Result<SyncResult> {
 
     let todo_rel = todo_path_relative_to_repo(config)?;
     let previous_content = git_show_or_empty(&config.config_dir, &format!("HEAD:{todo_rel}"))?;
-    let current = read_todo_file(&config.todo_file)?;
+    let mut current = read_todo_file(&config.todo_file)?;
+    let (hydrated_content, hydrated_count, hydrate_issues) = hydrate_todo_ids(&current.content);
+    if !hydrate_issues.is_empty() {
+        let details = hydrate_issues
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "todo.md contains lines that could not be auto-assigned an id\n{}",
+            details
+        );
+    }
+    if hydrated_count > 0 {
+        write_todo_file_atomic(&config.todo_file, &hydrated_content)?;
+        current = read_todo_file(&config.todo_file)?;
+    }
+
     let validation_issues = validate_todo_content(&current.content);
     if !validation_issues.is_empty() {
         let details = validation_issues
@@ -325,5 +395,21 @@ mod tests {
         assert_eq!(github_repo_slug("git@gitlab.com:acme/todos.git"), None);
         assert_eq!(github_repo_slug("https://github.com/acme"), None);
         assert_eq!(github_repo_slug(""), None);
+    }
+
+    #[test]
+    fn upserts_env_variable_idempotently() {
+        let temp_dir = std::env::temp_dir().join(format!("todo_md_test_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let env_path = temp_dir.join(".env");
+
+        write_todo_file_atomic(&env_path, "FOO=bar\nTODOS_GIT_REMOTE=old\n").expect("write");
+        upsert_env_var(&env_path, "TODOS_GIT_REMOTE", "git@github.com:acme/new.git")
+            .expect("upsert");
+
+        let content = fs::read_to_string(&env_path).expect("read");
+        assert!(content.contains("FOO=bar"));
+        assert!(content.contains("TODOS_GIT_REMOTE=git@github.com:acme/new.git"));
+        assert!(!content.contains("TODOS_GIT_REMOTE=old"));
     }
 }

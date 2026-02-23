@@ -121,9 +121,18 @@ pub fn format_todo_content(content: &str) -> (String, Vec<String>) {
         }
 
         if !line.contains("(id:") {
-            issues.push(format!("line {line_no}: cannot format todo without id"));
-            out.push(line.trim_end().to_string());
-            continue;
+            let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
+            match parsed {
+                Ok(todo) => {
+                    out.push(todo.to_line());
+                    continue;
+                }
+                Err(_) => {
+                    issues.push(format!("line {line_no}: cannot format todo without id"));
+                    out.push(line.trim_end().to_string());
+                    continue;
+                }
+            }
         }
 
         let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
@@ -142,6 +151,40 @@ pub fn format_todo_content(content: &str) -> (String, Vec<String>) {
     }
 
     (formatted, issues)
+}
+
+pub fn hydrate_todo_ids(content: &str) -> (String, usize, Vec<String>) {
+    let mut changed = 0_usize;
+    let mut issues = Vec::new();
+    let mut out = Vec::new();
+
+    for (idx, line) in content.lines().enumerate() {
+        let line_no = idx + 1;
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("- [") || line.contains("(id:") {
+            out.push(line.to_string());
+            continue;
+        }
+
+        let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
+        match parsed {
+            Ok(todo) => {
+                out.push(todo.to_line());
+                changed += 1;
+            }
+            Err(_) => {
+                out.push(line.to_string());
+                issues.push(format!("line {line_no}: could not auto-generate id"));
+            }
+        }
+    }
+
+    let mut hydrated = out.join("\n");
+    if content.ends_with('\n') {
+        hydrated.push('\n');
+    }
+
+    (hydrated, changed, issues)
 }
 
 pub fn write_todo_file_atomic(path: &Path, content: &str) -> Result<()> {
@@ -222,5 +265,14 @@ mod tests {
             formatted,
             "- [_] Pay rent (reccurence: monthly on 1st) (id: 123e4567-e89b-12d3-a456-426614174000)\n"
         );
+    }
+
+    #[test]
+    fn hydrates_missing_ids_for_valid_todo_lines() {
+        let input = "- [ ] Walk dog\n";
+        let (hydrated, changed, issues) = hydrate_todo_ids(input);
+        assert_eq!(changed, 1);
+        assert!(issues.is_empty());
+        assert!(hydrated.contains("(id: "));
     }
 }

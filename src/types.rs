@@ -49,7 +49,7 @@ impl Todo {
 
     pub fn from_str(line: &str) -> Todo {
         let todo_regex = Regex::new(
-            r"^- \[(?P<done>[x_])\] (?P<name>.+?)(?: \(due: (?P<due_date>[^)]+)\))?(?: \(reccurence: (?P<reccurence>[^)]+)\))?(?: \(id: (?P<id>[0-9a-fA-F-]{36})\))?\.?$",
+            r"^- \[(?P<done>[xX_ ])\] (?P<name>.+?)(?: \(due: (?P<due_date>[^)]+)\))?(?: \((?:reccurence|recurrence): (?P<reccurence>[^)]+)\))?(?: \(id: (?P<id>[0-9a-fA-F-]{36})\))?\.?$",
         )
         .expect("todo parser regex must be valid");
 
@@ -58,7 +58,7 @@ impl Todo {
             .expect("todo line does not match expected format");
 
         let mut todo = Todo::new(captures["name"].trim().to_string());
-        todo.done = &captures["done"] == "x";
+        todo.done = matches!(&captures["done"], "x" | "X");
 
         if let Some(due_date_match) = captures.name("due_date") {
             if let Some(parsed_due_date) = parse_human_datetime(due_date_match.as_str(), Utc::now())

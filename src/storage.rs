@@ -271,4 +271,20 @@ mod tests {
         assert!(issues.is_empty());
         assert!(hydrated.contains("(id: "));
     }
+
+    #[test]
+    fn formatting_rolls_completed_recurring_todo_forward() {
+        let input = "- [x] Water plants (due: 2026-02-23T14:00:00Z) (reccurence: weekly on monday, thursday) (id: 123e4567-e89b-12d3-a456-426614174000)\n";
+        let (formatted, issues) = format_todo_content(input);
+
+        assert!(issues.is_empty());
+        assert!(formatted.contains("- [_] Water plants"));
+
+        let line = formatted.lines().next().expect("first line");
+        let reparsed = Todo::from_str(line);
+        assert_eq!(
+            reparsed.due_date().expect("due date").to_rfc3339(),
+            "2026-02-26T14:00:00+00:00"
+        );
+    }
 }

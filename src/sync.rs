@@ -7,8 +7,8 @@ use anyhow::{bail, Context, Result};
 use crate::config::{require_remote, AppConfig};
 use crate::diff::{line_diff_summary, semantic_changes, ChangeSet};
 use crate::storage::{
-    ensure_layout, hydrate_todo_ids, parse_todo_content, read_todo_file, validate_todo_content,
-    write_todo_file_atomic,
+    ensure_layout, format_todo_content, hydrate_todo_ids, parse_todo_content, read_todo_file,
+    validate_todo_content, write_todo_file_atomic,
 };
 
 #[derive(Debug, Clone)]
@@ -176,6 +176,24 @@ pub fn sync(config: &AppConfig) -> Result<SyncResult> {
     }
     if hydrated_count > 0 {
         write_todo_file_atomic(&config.todo_file, &hydrated_content)?;
+        current = read_todo_file(&config.todo_file)?;
+    }
+
+    let (formatted_content, format_issues) = format_todo_content(&current.content);
+    if !format_issues.is_empty() {
+        let details = format_issues
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "todo.md contains lines that could not be normalized\n{}",
+            details
+        );
+    }
+    if formatted_content != current.content {
+        write_todo_file_atomic(&config.todo_file, &formatted_content)?;
         current = read_todo_file(&config.todo_file)?;
     }
 

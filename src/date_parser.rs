@@ -25,6 +25,13 @@ fn parse_human_datetime_with_tz(
     let (value_without_tz, tz) = split_timezone_suffix(&normalized, home_tz);
     let now_local = now_utc.with_timezone(&tz);
 
+    if let Some(explicit_date) = parse_explicit_date(&value_without_tz) {
+        let (hour, minute, _) = parse_time(&value_without_tz).unwrap_or((23, 59, false));
+        let local_naive = explicit_date.and_time(NaiveTime::from_hms_opt(hour, minute, 0)?);
+        let local_dt = tz.from_local_datetime(&local_naive).single()?;
+        return Some(local_dt.with_timezone(&Utc));
+    }
+
     let (hour, minute, has_time) = parse_time(&value_without_tz).unwrap_or((23, 59, false));
     let target_date = resolve_date(
         &value_without_tz,
@@ -38,6 +45,26 @@ fn parse_human_datetime_with_tz(
     let local_naive = target_date.and_time(NaiveTime::from_hms_opt(hour, minute, 0)?);
     let local_dt = tz.from_local_datetime(&local_naive).single()?;
     Some(local_dt.with_timezone(&Utc))
+}
+
+fn parse_explicit_date(value: &str) -> Option<NaiveDate> {
+    let ymd_re = Regex::new(r"\b(?P<y>\d{4})-(?P<m>\d{1,2})-(?P<d>\d{1,2})\b").expect("ymd regex");
+    if let Some(captures) = ymd_re.captures(value) {
+        let year: i32 = captures.name("y")?.as_str().parse().ok()?;
+        let month: u32 = captures.name("m")?.as_str().parse().ok()?;
+        let day: u32 = captures.name("d")?.as_str().parse().ok()?;
+        return NaiveDate::from_ymd_opt(year, month, day);
+    }
+
+    let mdy_re = Regex::new(r"\b(?P<m>\d{1,2})/(?P<d>\d{1,2})/(?P<y>\d{4})\b").expect("mdy regex");
+    if let Some(captures) = mdy_re.captures(value) {
+        let year: i32 = captures.name("y")?.as_str().parse().ok()?;
+        let month: u32 = captures.name("m")?.as_str().parse().ok()?;
+        let day: u32 = captures.name("d")?.as_str().parse().ok()?;
+        return NaiveDate::from_ymd_opt(year, month, day);
+    }
+
+    None
 }
 
 fn normalize_input(value: &str) -> String {
@@ -276,5 +303,12 @@ mod tests {
     fn parses_time_with_utc_suffix() {
         let dt = parse_human_datetime_with_tz("9:00PM UTC", now_utc(), et()).expect("parse UTC");
         assert_eq!(dt.to_rfc3339(), "2026-02-23T21:00:00+00:00");
+    }
+
+    #[test]
+    fn parses_explicit_local_date_and_time() {
+        let dt = parse_human_datetime_with_tz("2026-02-24 9:00 pm", now_utc(), et())
+            .expect("parse explicit date/time");
+        assert_eq!(dt.to_rfc3339(), "2026-02-25T02:00:00+00:00");
     }
 }

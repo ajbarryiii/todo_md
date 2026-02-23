@@ -95,7 +95,11 @@ impl Todo {
         let mut line = format!("- [{}] {}", if self.done { "x" } else { "_" }, self.name);
 
         if let Some(due_date) = self.due_date {
-            line.push_str(&format!(" (due: {})", due_date.to_rfc3339()));
+            let local_due = due_date.with_timezone(&Local);
+            line.push_str(&format!(
+                " (due: {})",
+                local_due.format("%Y-%m-%d %I:%M %p")
+            ));
         }
 
         if let Some(reccurence) = self.recurence() {
@@ -308,5 +312,22 @@ mod tests {
 
         assert!(!todo.done());
         assert!(todo.due_date().is_some());
+    }
+
+    #[test]
+    fn serializes_due_date_in_human_local_format() {
+        let todo = Todo::from_str(
+            "- [_] Test (due: 2026-02-23T14:05:27Z) (id: 123e4567-e89b-12d3-a456-426614174000)",
+        );
+        let line = todo.to_line();
+
+        assert!(line.contains("(due: "));
+        let due_part = line
+            .split("(due: ")
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .expect("due part");
+        assert!(!due_part.contains(":27"));
+        assert!(!due_part.contains('T'));
     }
 }

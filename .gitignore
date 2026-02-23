@@ -1,0 +1,10 @@
+/target
+
+/.cargo-home
+# direnv / Nix shells
+.direnv/
+
+# Result symlinks from 'nix-build' or 'nix build'
+result
+result-*
+

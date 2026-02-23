@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use regex::Regex;
 use uuid::Uuid;
 
 use crate::types::Todo;
@@ -49,6 +50,98 @@ pub fn parse_todo_content(content: &str) -> ParsedTodoFile {
         content: content.to_string(),
         todos_by_id: parse_todos_from_content(content),
     }
+}
+
+pub fn validate_todo_content(content: &str) -> Vec<String> {
+    let mut issues = Vec::new();
+    let mut seen_ids: HashMap<Uuid, usize> = HashMap::new();
+    let id_re = Regex::new(r"\(id:\s*([0-9a-fA-F-]{36})\)").expect("valid id regex");
+
+    for (idx, line) in content.lines().enumerate() {
+        let line_no = idx + 1;
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with("<<<<<<<")
+            || trimmed.starts_with("=======")
+            || trimmed.starts_with(">>>>>>>")
+        {
+            issues.push(format!("line {line_no}: unresolved git conflict marker"));
+            continue;
+        }
+
+        if !trimmed.starts_with("- [") {
+            continue;
+        }
+
+        if !line.contains("(id:") {
+            issues.push(format!("line {line_no}: todo line is missing required id"));
+            continue;
+        }
+
+        let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
+        let todo = match parsed {
+            Ok(todo) => todo,
+            Err(_) => {
+                issues.push(format!("line {line_no}: todo line could not be parsed"));
+                continue;
+            }
+        };
+
+        if let Some(captures) = id_re.captures(line) {
+            if let Some(raw_id) = captures.get(1).map(|m| m.as_str()) {
+                if let Ok(id) = Uuid::parse_str(raw_id) {
+                    if let Some(previous_line) = seen_ids.insert(id, line_no) {
+                        issues.push(format!(
+                            "line {line_no}: duplicate id {id} (first seen on line {previous_line})"
+                        ));
+                    }
+                    if id != todo.id() {
+                        issues.push(format!(
+                            "line {line_no}: parsed id mismatch, this line may be malformed"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    issues
+}
+
+pub fn format_todo_content(content: &str) -> (String, Vec<String>) {
+    let mut issues = Vec::new();
+    let mut out = Vec::new();
+
+    for (idx, line) in content.lines().enumerate() {
+        let line_no = idx + 1;
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("- [") {
+            out.push(line.trim_end().to_string());
+            continue;
+        }
+
+        if !line.contains("(id:") {
+            issues.push(format!("line {line_no}: cannot format todo without id"));
+            out.push(line.trim_end().to_string());
+            continue;
+        }
+
+        let parsed = std::panic::catch_unwind(|| Todo::from_str(line));
+        match parsed {
+            Ok(todo) => out.push(todo.to_line()),
+            Err(_) => {
+                issues.push(format!("line {line_no}: todo line could not be parsed"));
+                out.push(line.trim_end().to_string());
+            }
+        }
+    }
+
+    let mut formatted = out.join("\n");
+    if content.ends_with('\n') {
+        formatted.push('\n');
+    }
+
+    (formatted, issues)
 }
 
 pub fn write_todo_file_atomic(path: &Path, content: &str) -> Result<()> {
@@ -104,4 +197,30 @@ fn ensure_gitignore_has_env(gitignore_path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_missing_id_and_conflicts() {
+        let input = "<<<<<<< HEAD\n- [_] Task without id\n";
+        let issues = validate_todo_content(input);
+        assert_eq!(issues.len(), 2);
+        assert!(issues.iter().any(|m| m.contains("conflict marker")));
+        assert!(issues.iter().any(|m| m.contains("missing required id")));
+    }
+
+    #[test]
+    fn formats_parsable_todo_lines() {
+        let input =
+            "- [_] Pay rent (reccurence: monthly on the 1st) (id: 123e4567-e89b-12d3-a456-426614174000)\n";
+        let (formatted, issues) = format_todo_content(input);
+        assert!(issues.is_empty());
+        assert_eq!(
+            formatted,
+            "- [_] Pay rent (reccurence: monthly on 1st) (id: 123e4567-e89b-12d3-a456-426614174000)\n"
+        );
+    }
 }

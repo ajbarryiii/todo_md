@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::config::{require_remote, AppConfig};
 use crate::diff::{line_diff_summary, semantic_changes, ChangeSet};
-use crate::storage::{ensure_layout, parse_todo_content, read_todo_file};
+use crate::storage::{ensure_layout, parse_todo_content, read_todo_file, validate_todo_content};
 
 #[derive(Debug, Clone)]
 pub struct SyncResult {
@@ -103,6 +103,20 @@ pub fn sync(config: &AppConfig) -> Result<SyncResult> {
     let todo_rel = todo_path_relative_to_repo(config)?;
     let previous_content = git_show_or_empty(&config.config_dir, &format!("HEAD:{todo_rel}"))?;
     let current = read_todo_file(&config.todo_file)?;
+    let validation_issues = validate_todo_content(&current.content);
+    if !validation_issues.is_empty() {
+        let details = validation_issues
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "todo.md has invalid content; run `todo_md doctor` and fix issues before sync\n{}",
+            details
+        );
+    }
+
     let previous = parse_todo_content(&previous_content);
 
     let change_set = semantic_changes(&previous, &current);

@@ -8,6 +8,7 @@ pub mod types;
 
 use anyhow::{bail, Result};
 use config::AppConfig;
+use storage::{format_todo_content, read_todo_file, validate_todo_content, write_todo_file_atomic};
 
 fn main() {
     if let Err(error) = run() {
@@ -63,6 +64,41 @@ fn run() -> Result<()> {
                 println!("github token: set");
             }
         }
+        "doctor" => {
+            let config = AppConfig::load()?;
+            let parsed = read_todo_file(&config.todo_file)?;
+            let issues = validate_todo_content(&parsed.content);
+            if issues.is_empty() {
+                println!("todo.md is healthy");
+            } else {
+                println!("found {} issue(s):", issues.len());
+                for issue in issues {
+                    println!("- {issue}");
+                }
+                bail!("todo.md has validation issues");
+            }
+        }
+        "fmt" => {
+            let config = AppConfig::load()?;
+            let parsed = read_todo_file(&config.todo_file)?;
+            let (formatted, issues) = format_todo_content(&parsed.content);
+            if !issues.is_empty() {
+                println!(
+                    "formatting skipped some lines due to {} issue(s):",
+                    issues.len()
+                );
+                for issue in issues {
+                    println!("- {issue}");
+                }
+            }
+
+            if formatted == parsed.content {
+                println!("todo.md already formatted");
+            } else {
+                write_todo_file_atomic(&config.todo_file, &formatted)?;
+                println!("formatted {}", config.todo_file.display());
+            }
+        }
         "help" | "-h" | "--help" => {
             print_help();
         }
@@ -77,4 +113,6 @@ fn print_help() {
     println!("  setup [remote-url]  Initialize ~/.config/todos and git repo");
     println!("  sync                Pull/rebase, diff todo.md, commit, and push");
     println!("  where               Show resolved config and todo paths");
+    println!("  doctor              Validate todo.md for sync-safe issues");
+    println!("  fmt                 Canonicalize todo line formatting");
 }

@@ -147,18 +147,9 @@ pub fn sync(config: &AppConfig) -> Result<SyncResult> {
         &config.config_dir,
         ["checkout", "-B", config.git_branch.as_str()],
     )?;
-    run_git_checked(
-        &config.config_dir,
-        [
-            "pull",
-            "--rebase",
-            "--autostash",
-            "origin",
-            config.git_branch.as_str(),
-        ],
-    )?;
-
     let todo_rel = todo_path_relative_to_repo(config)?;
+    pull_with_recovery(config, &todo_rel)?;
+
     let previous_content = git_show_or_empty(&config.config_dir, &format!("HEAD:{todo_rel}"))?;
     let mut current = read_todo_file(&config.todo_file)?;
     let (hydrated_content, hydrated_count, hydrate_issues) = hydrate_todo_ids(&current.content);
@@ -243,6 +234,103 @@ pub fn sync(config: &AppConfig) -> Result<SyncResult> {
         change_set,
         line_summary,
     })
+}
+
+fn pull_with_recovery(config: &AppConfig, todo_rel: &str) -> Result<()> {
+    let args = [
+        "pull",
+        "--rebase",
+        "--autostash",
+        "origin",
+        config.git_branch.as_str(),
+    ];
+
+    let first = run_git(&config.config_dir, args)?;
+    if first.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&first.stderr).to_string();
+    if !is_untracked_overwrite_pull_error(&stderr) {
+        let stdout = String::from_utf8_lossy(&first.stdout);
+        bail!(
+            "git {} failed\nstdout:\n{}\nstderr:\n{}",
+            args.join(" "),
+            stdout.trim(),
+            stderr.trim()
+        );
+    }
+
+    let mut moved_any = false;
+    moved_any |= backup_untracked_if_present(&config.config_dir, todo_rel)?;
+    moved_any |= backup_untracked_if_present(&config.config_dir, ".gitignore")?;
+
+    if !moved_any {
+        let stdout = String::from_utf8_lossy(&first.stdout);
+        bail!(
+            "git pull failed due to untracked files that would be overwritten. Resolve manually.\nstdout:\n{}\nstderr:\n{}",
+            stdout.trim(),
+            stderr.trim()
+        );
+    }
+
+    let second = run_git(&config.config_dir, args)?;
+    if second.status.success() {
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    bail!(
+        "git {} failed after backing up untracked files\nstdout:\n{}\nstderr:\n{}",
+        args.join(" "),
+        stdout.trim(),
+        stderr.trim()
+    )
+}
+
+fn is_untracked_overwrite_pull_error(stderr: &str) -> bool {
+    let s = stderr.to_ascii_lowercase();
+    s.contains("untracked working tree files would be overwritten by merge")
+}
+
+fn backup_untracked_if_present(repo_dir: &Path, rel_path: &str) -> Result<bool> {
+    let status = run_git_checked(repo_dir, ["status", "--porcelain", "--", rel_path])?;
+    let is_untracked = status
+        .lines()
+        .any(|line| line.trim_start().starts_with("??"));
+
+    if !is_untracked {
+        return Ok(false);
+    }
+
+    let src = repo_dir.join(rel_path);
+    if !src.exists() {
+        return Ok(false);
+    }
+
+    let mut backup_name = src
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "backup".to_string());
+    backup_name.push_str(".todo_md_local_backup");
+
+    let mut dst = src.with_file_name(&backup_name);
+    let mut i = 1_u32;
+    while dst.exists() {
+        dst = src.with_file_name(format!("{backup_name}.{i}"));
+        i += 1;
+    }
+
+    fs::rename(&src, &dst).with_context(|| {
+        format!(
+            "failed to backup conflicting untracked file {} to {}",
+            src.display(),
+            dst.display()
+        )
+    })?;
+
+    Ok(true)
 }
 
 fn ensure_remote(repo_dir: &Path, name: &str, url: &str) -> Result<()> {
@@ -419,6 +507,13 @@ mod tests {
         assert_eq!(github_repo_slug("git@gitlab.com:acme/todos.git"), None);
         assert_eq!(github_repo_slug("https://github.com/acme"), None);
         assert_eq!(github_repo_slug(""), None);
+    }
+
+    #[test]
+    fn detects_untracked_overwrite_pull_error() {
+        let stderr =
+            "error: The following untracked working tree files would be overwritten by merge:";
+        assert!(is_untracked_overwrite_pull_error(stderr));
     }
 
     #[test]

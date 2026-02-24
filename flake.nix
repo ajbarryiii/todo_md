@@ -27,13 +27,6 @@
             # CLI/runtime dependencies
             pkg-config
             openssl
-            sqlite
-
-            # React Native / JavaScript toolchain
-            nodejs_22
-            yarn
-            watchman
-            jdk17
 
             # Helpful utilities for scripts and API/dev tooling
             git
@@ -55,10 +48,6 @@
             echo "Rust + React Native development shell ready."
             echo "- Rust: $(rustc --version)"
             echo "- Cargo: $(cargo --version)"
-            echo "- Node: $(node --version)"
-            echo "- Yarn: $(yarn --version)"
-            echo "- Java: $(java -version 2>&1 | head -n 1)"
-            echo "- SQLite: $(sqlite3 --version | awk '{print $1}')"
           '';
         };
       });

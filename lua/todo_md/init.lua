@@ -83,6 +83,18 @@ function M.open_todo()
   end)
 end
 
+function M.open_todo_synced()
+  run_cli({ "sync" }, function(obj)
+    if obj.code ~= 0 then
+      local err = (obj.stderr and obj.stderr ~= "") and obj.stderr or obj.stdout
+      notify("todo_md sync failed: " .. (err or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+
+    M.open_todo()
+  end)
+end
+
 function M.open_repo()
   M.where(function(parsed)
     if not parsed or not parsed.config then
@@ -165,8 +177,8 @@ function M._register_commands()
   end
 
   vim.api.nvim_create_user_command("TodoOpen", function()
-    M.open_todo()
-  end, { desc = "Open todo.md" })
+    M.open_todo_synced()
+  end, { desc = "Sync and open todo.md" })
 
   vim.api.nvim_create_user_command("TodoSync", function()
     M.sync()
@@ -200,7 +212,9 @@ function M._register_keymaps()
 
   local set = vim.keymap.set
   if km.open and km.open ~= "" then
-    set("n", km.open, "<cmd>TodoOpen<cr>", { desc = "Todo: open todo.md" })
+    set("n", km.open, function()
+      M.open_todo_synced()
+    end, { desc = "Todo: sync + open todo.md" })
   end
   if km.sync and km.sync ~= "" then
     set("n", km.sync, "<cmd>TodoSync<cr>", { desc = "Todo: sync" })
